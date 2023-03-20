@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 )
 
 //go:generate go run github.com/vektra/mockery/v2@v2.20.2 --name freePortProvider
@@ -39,14 +38,6 @@ type portForwarder interface {
 }
 
 type (
-	PortForwardProcess struct {
-		Port   uint
-		err    error
-		doneCh chan struct{}
-		stop   sync.Once
-		mx     sync.Mutex
-	}
-
 	PortForwarder struct {
 		k8sCfg           *rest.Config
 		freePortProvider freePortProvider
@@ -85,24 +76,8 @@ func (p *PortForwardProcess) setError(err error) {
 	p.err = err
 }
 
-func (p *PortForwardProcess) Stop() {
-	p.stop.Do(func() {
-		close(p.doneCh)
-	})
-}
-
-func (p *PortForwardProcess) Done() <-chan struct{} {
-	return p.doneCh
-}
-
-func (p *PortForwardProcess) Err() error {
-	p.mx.Lock()
-	defer p.mx.Unlock()
-	return p.err
-}
-
 func (pf *PortForwarder) PortForwardAPod(
-	ctx context.Context,
+	baseCtx context.Context,
 	targetPort uint,
 	namespace string,
 	podLabelSelector map[string]string,
@@ -112,15 +87,26 @@ func (pf *PortForwarder) PortForwardAPod(
 		return nil, fmt.Errorf("get free port failed: %w", err)
 	}
 
-	podName, err := pf.getPodName(ctx, namespace, podLabelSelector)
+	podName, err := pf.getPodName(baseCtx, namespace, podLabelSelector)
 	if err != nil {
 		return nil, fmt.Errorf("could not port forward a pod: %w", err)
 	}
 
-	process := &PortForwardProcess{Port: freePort, doneCh: make(chan struct{}, 1)}
+	ctx, cancel := context.WithCancel(baseCtx)
+	process := &PortForwardProcess{
+		Port:   freePort,
+		cancel: cancel,
+		doneCh: make(chan struct{}),
+	}
+
+	process.wg.Add(1)
 	go func(p *PortForwardProcess) {
-		defer p.Stop()
-		if err := pf.portForwardAPod(ctx, p.doneCh, namespace, podName, freePort, targetPort); err != nil {
+		defer func() {
+			process.wg.Done()
+			p.Stop()
+		}()
+
+		if err := pf.portForwardAPod(ctx, namespace, podName, freePort, targetPort); err != nil {
 			p.setError(fmt.Errorf(
 				"init port forwarder for pod %s in namespace %s failed: %w",
 				podName, namespace, err,
@@ -133,13 +119,13 @@ func (pf *PortForwarder) PortForwardAPod(
 
 func (pf *PortForwarder) portForwardAPod(
 	ctx context.Context,
-	doneCh chan struct{},
 	namespace,
 	podName string,
 	freePort uint,
 	targetPort uint,
 ) error {
 	readyCh := make(chan struct{}, 1)
+	stopCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
 
 	roundTripper, upgrader, err := spdy.RoundTripperFor(pf.k8sCfg)
@@ -166,7 +152,7 @@ func (pf *PortForwarder) portForwardAPod(
 		if err = pf.forwarder.forward(
 			dialer,
 			[]string{fmt.Sprintf("%d:%d", freePort, targetPort)},
-			doneCh, readyCh,
+			stopCh, readyCh,
 			os.Stdout, os.Stderr, // todo: maybe log std err
 		); err != nil {
 			errCh <- err
@@ -175,6 +161,7 @@ func (pf *PortForwarder) portForwardAPod(
 
 	select {
 	case <-ctx.Done():
+		close(stopCh)
 		return ctx.Err()
 	case <-readyCh:
 		return nil
