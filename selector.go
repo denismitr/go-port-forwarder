@@ -18,24 +18,6 @@ func newSelectorFromKubeConfig(k8sClientSet *kubernetes.Clientset) *selector {
 	return &selector{clientSet: k8sClientSet}
 }
 
-func (s *selector) ListNamespaces(
-	ctx context.Context,
-) (*corev1.NamespaceList, error) {
-	opts := metav1.ListOptions{}
-	resp, err := s.clientSet.
-		CoreV1().
-		Namespaces().
-		List(ctx, opts)
-	if err != nil {
-		return nil, errors.Wrapf(
-			err, "failed to list namespaces with opts %+v",
-			opts,
-		)
-	}
-
-	return resp, nil
-}
-
 type listPodsCommand struct {
 	namespace      string
 	labelSelectors map[string]string
