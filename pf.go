@@ -6,6 +6,7 @@ import (
 	"io"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
@@ -37,24 +38,20 @@ type portForwarder interface {
 	) error
 }
 
-type (
-	PortForwarder struct {
-		k8sCfg           *rest.Config
-		freePortProvider freePortProvider
-		forwarder        portForwarder
-		podLister        podProvider
-	}
-)
+//go:generate go run github.com/vektra/mockery/v2@v2.20.2 --name connector
+type connector interface {
+	Connect() (*rest.Config, *kubernetes.Clientset, error)
+}
 
-func NewPortForwarder(masterURL string, kubeConfig string) (*PortForwarder, error) {
-	k8sCfg, err := parseKubeConfig(
-		masterURL, kubeConfig,
-	)
-	if err != nil {
-		return nil, err
-	}
+type PortForwarder struct {
+	restCfg          *rest.Config
+	freePortProvider freePortProvider
+	forwarder        portForwarder
+	podLister        podProvider
+}
 
-	k8sClientSet, err := createK8SClientSet(k8sCfg)
+func NewPortForwarder(conn connector) (*PortForwarder, error) {
+	restCfg, k8sClientSet, err := conn.Connect()
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +60,7 @@ func NewPortForwarder(masterURL string, kubeConfig string) (*PortForwarder, erro
 	s := newSelectorFromKubeConfig(k8sClientSet)
 
 	return &PortForwarder{
-		k8sCfg:           k8sCfg,
+		restCfg:          restCfg,
 		freePortProvider: fpp,
 		podLister:        s,
 		forwarder:        &spdyForwarder{},
@@ -77,7 +74,7 @@ func (p *PortForwardProcess) setError(err error) {
 }
 
 func (pf *PortForwarder) PortForwardAPod(
-	baseCtx context.Context,
+	ctx context.Context,
 	targetPort uint,
 	namespace string,
 	podLabelSelector map[string]string,
@@ -87,18 +84,12 @@ func (pf *PortForwarder) PortForwardAPod(
 		return nil, fmt.Errorf("get free port failed: %w", err)
 	}
 
-	podName, err := pf.getPodName(baseCtx, namespace, podLabelSelector)
+	podName, err := pf.getPodName(ctx, namespace, podLabelSelector)
 	if err != nil {
 		return nil, fmt.Errorf("could not port forward a pod: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(baseCtx)
-	process := &PortForwardProcess{
-		Port:   freePort,
-		cancel: cancel,
-		doneCh: make(chan struct{}),
-	}
-
+	process := newPortForwardProcess(ctx, freePort)
 	process.wg.Add(1)
 	go func(p *PortForwardProcess) {
 		defer func() {
@@ -106,7 +97,7 @@ func (pf *PortForwarder) PortForwardAPod(
 			p.Stop()
 		}()
 
-		if err := pf.portForwardAPod(ctx, namespace, podName, freePort, targetPort); err != nil {
+		if err := pf.portForwardAPod(p.stopCh, namespace, podName, freePort, targetPort); err != nil {
 			p.setError(fmt.Errorf(
 				"init port forwarder for pod %s in namespace %s failed: %w",
 				podName, namespace, err,
@@ -118,17 +109,16 @@ func (pf *PortForwarder) PortForwardAPod(
 }
 
 func (pf *PortForwarder) portForwardAPod(
-	ctx context.Context,
+	stopCh <-chan struct{},
 	namespace,
 	podName string,
 	freePort uint,
 	targetPort uint,
 ) error {
 	readyCh := make(chan struct{}, 1)
-	stopCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
 
-	roundTripper, upgrader, err := spdy.RoundTripperFor(pf.k8sCfg)
+	roundTripper, upgrader, err := spdy.RoundTripperFor(pf.restCfg)
 	if err != nil {
 		return err
 	}
@@ -137,7 +127,7 @@ func (pf *PortForwarder) portForwardAPod(
 		"/api/v1/namespaces/%s/pods/%s/portforward",
 		namespace, podName,
 	)
-	hostIP := strings.TrimLeft(pf.k8sCfg.Host, "https://")
+	hostIP := strings.TrimLeft(pf.restCfg.Host, "https://")
 	serverURL := url.URL{Scheme: "https", Path: path, Host: hostIP}
 
 	dialer := spdy.NewDialer(
@@ -160,9 +150,6 @@ func (pf *PortForwarder) portForwardAPod(
 	}()
 
 	select {
-	case <-ctx.Done():
-		close(stopCh)
-		return ctx.Err()
 	case <-readyCh:
 		return nil
 	case pfErr, ok := <-errCh:
