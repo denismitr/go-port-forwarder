@@ -1,6 +1,7 @@
 package portforwarder
 
 import (
+	"fmt"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -22,12 +23,12 @@ func (c *KubeConnector) Connect() (*rest.Config, *kubernetes.Clientset, error) {
 		c.masterURL, c.kubeConfig,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to get rest config for kubernetes: %w", err)
 	}
 
 	k8sClientSet, err := createK8SClientSet(restCfg)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to create kubernetes client set: %w", err)
 	}
 
 	return restCfg, k8sClientSet, nil

@@ -67,12 +67,6 @@ func NewPortForwarder(conn connector) (*PortForwarder, error) {
 	}, nil
 }
 
-func (p *PortForwardProcess) setError(err error) {
-	p.mx.Lock()
-	defer p.mx.Unlock()
-	p.err = err
-}
-
 func (pf *PortForwarder) PortForwardAPod(
 	ctx context.Context,
 	targetPort uint,
@@ -97,7 +91,7 @@ func (pf *PortForwarder) PortForwardAPod(
 			p.Stop()
 		}()
 
-		if err := pf.portForwardAPod(p.stopCh, namespace, podName, freePort, targetPort); err != nil {
+		if err := pf.portForwardAPod(p, namespace, podName, freePort, targetPort); err != nil {
 			p.setError(fmt.Errorf(
 				"init port forwarder for pod %s in namespace %s failed: %w",
 				podName, namespace, err,
@@ -109,13 +103,12 @@ func (pf *PortForwarder) PortForwardAPod(
 }
 
 func (pf *PortForwarder) portForwardAPod(
-	stopCh <-chan struct{},
+	process *PortForwardProcess,
 	namespace,
 	podName string,
 	freePort uint,
 	targetPort uint,
 ) error {
-	readyCh := make(chan struct{}, 1)
 	errCh := make(chan error, 1)
 
 	roundTripper, upgrader, err := spdy.RoundTripperFor(pf.restCfg)
@@ -123,13 +116,7 @@ func (pf *PortForwarder) portForwardAPod(
 		return err
 	}
 
-	path := fmt.Sprintf(
-		"/api/v1/namespaces/%s/pods/%s/portforward",
-		namespace, podName,
-	)
-	hostIP := strings.TrimLeft(pf.restCfg.Host, "https://")
-	serverURL := url.URL{Scheme: "https", Path: path, Host: hostIP}
-
+	serverURL := resolveServerURL(namespace, podName, pf)
 	dialer := spdy.NewDialer(
 		upgrader,
 		&http.Client{Transport: roundTripper},
@@ -142,7 +129,7 @@ func (pf *PortForwarder) portForwardAPod(
 		if err = pf.forwarder.forward(
 			dialer,
 			[]string{fmt.Sprintf("%d:%d", freePort, targetPort)},
-			stopCh, readyCh,
+			process.stopCh, process.readyCh,
 			os.Stdout, os.Stderr, // todo: maybe log std err
 		); err != nil {
 			errCh <- err
@@ -150,7 +137,7 @@ func (pf *PortForwarder) portForwardAPod(
 	}()
 
 	select {
-	case <-readyCh:
+	case <-process.stopCh:
 		return nil
 	case pfErr, ok := <-errCh:
 		if ok {
@@ -161,6 +148,16 @@ func (pf *PortForwarder) portForwardAPod(
 		}
 		return nil
 	}
+}
+
+func resolveServerURL(namespace string, podName string, pf *PortForwarder) url.URL {
+	path := fmt.Sprintf(
+		"/api/v1/namespaces/%s/pods/%s/portforward",
+		namespace, podName,
+	)
+	hostIP := strings.TrimLeft(pf.restCfg.Host, "https://")
+	serverURL := url.URL{Scheme: "https", Path: path, Host: hostIP}
+	return serverURL
 }
 
 func (pf *PortForwarder) getPodName(

@@ -19,6 +19,14 @@ func createK8SClientSet(k8sCfg *rest.Config) (*kubernetes.Clientset, error) {
 }
 
 func parseKubeConfig(masterURL, config string) (*rest.Config, error) {
+	if masterURL == "" {
+		return nil, errors.New("master URL cannot be empty")
+	}
+
+	if config == "" {
+		return nil, errors.New("kube config cannot be empty")
+	}
+	
 	k8sCfg, err := clientcmd.BuildConfigFromKubeconfigGetter(
 		masterURL,
 		func() (*clientcmdapi.Config, error) {

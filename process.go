@@ -8,6 +8,7 @@ import (
 type PortForwardProcess struct {
 	Port    uint
 	err     error
+	readyCh chan struct{}
 	doneCh  chan struct{}
 	stopCh  chan struct{}
 	stopper sync.Once
@@ -17,9 +18,10 @@ type PortForwardProcess struct {
 
 func newPortForwardProcess(ctx context.Context, port uint) *PortForwardProcess {
 	p := &PortForwardProcess{
-		Port:   port,
-		doneCh: make(chan struct{}),
-		stopCh: make(chan struct{}),
+		Port:    port,
+		readyCh: make(chan struct{}),
+		doneCh:  make(chan struct{}),
+		stopCh:  make(chan struct{}),
 	}
 
 	go func() {
@@ -27,7 +29,9 @@ func newPortForwardProcess(ctx context.Context, port uint) *PortForwardProcess {
 		case <-ctx.Done():
 			p.setError(ctx.Err())
 			p.Stop()
+			return
 		case <-p.doneCh:
+			return
 		}
 	}()
 
@@ -42,6 +46,10 @@ func (p *PortForwardProcess) Stop() {
 	})
 }
 
+func (p *PortForwardProcess) Ready() <-chan struct{} {
+	return p.readyCh
+}
+
 func (p *PortForwardProcess) Done() <-chan struct{} {
 	return p.doneCh
 }
@@ -50,4 +58,14 @@ func (p *PortForwardProcess) Err() error {
 	p.mx.Lock()
 	defer p.mx.Unlock()
 	return p.err
+}
+
+func (p *PortForwardProcess) setError(err error) {
+	p.mx.Lock()
+	defer p.mx.Unlock()
+	p.err = err
+}
+
+func (p *PortForwardProcess) markAsReady() {
+	close(p.readyCh)
 }
