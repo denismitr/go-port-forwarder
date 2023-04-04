@@ -25,7 +25,7 @@ func TestNewPortForwarder(t *testing.T) {
 		assert.NotNil(t, pf.forwarder)
 		assert.NotNil(t, pf.restCfg)
 		assert.NotNil(t, pf.freePortProvider)
-		assert.NotNil(t, pf.podLister)
+		assert.NotNil(t, pf.podProvider)
 	})
 
 	t.Run("errored connector", func(t *testing.T) {
@@ -68,7 +68,7 @@ func TestPortForwarder_PortForwardAPod(t *testing.T) {
 
 		pf := &PortForwarder{
 			freePortProvider: fpp,
-			podLister:        pl,
+			podProvider:      pl,
 			forwarder:        f,
 			restCfg:          restCfg,
 		}
@@ -90,6 +90,33 @@ func TestPortForwarder_PortForwardAPod(t *testing.T) {
 		require.NoError(t, err)
 		<-process.Finished()
 		assert.NoError(t, process.Err())
+	})
+}
+
+func Test_getPodName(t *testing.T) {
+	t.Run("find by namespace and selector", func(t *testing.T) {
+		ctx := context.TODO()
+		namespace := "kafka-ns"
+		ls := map[string]string{"app": "foo"}
+		pod := v1.Pod{}
+		pod.Name = "kafka-pod-0"
+
+		pl := newMockPodProvider(t)
+		pl.EXPECT().
+			listPods(ctx, &listPodsCommand{
+				namespace:      namespace,
+				labelSelectors: ls,
+				fieldSelectors: map[string]string(nil),
+			}).
+			Times(1).
+			Return(&v1.PodList{Items: []v1.Pod{pod}}, nil)
+
+		podName, err := getPodName(ctx, pl, &TargetPod{
+			Namespace:     namespace,
+			LabelSelector: ls,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "kafka-pod-0", podName)
 	})
 }
 

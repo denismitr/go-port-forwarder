@@ -47,7 +47,7 @@ type PortForwarder struct {
 	restCfg          *rest.Config
 	freePortProvider freePortProvider
 	forwarder        portForwarder
-	podLister        podProvider
+	podProvider      podProvider
 }
 
 func NewPortForwarder(conn connector) (*PortForwarder, error) {
@@ -62,14 +62,19 @@ func NewPortForwarder(conn connector) (*PortForwarder, error) {
 	return &PortForwarder{
 		restCfg:          restCfg,
 		freePortProvider: fpp,
-		podLister:        s,
+		podProvider:      s,
 		forwarder:        &spdyForwarder{},
 	}, nil
 }
 
 type TargetPod struct {
-	Port          uint
-	Namespace     string
+	// Port of the pod in k8s
+	Port uint
+	// Name - optional pod name, to specify the exact pod name if known
+	Name string
+	// Namespace to look for the suitable pod to forward
+	Namespace string
+	// LabelSelector to match the suitable pod to forward
 	LabelSelector map[string]string
 }
 
@@ -82,7 +87,7 @@ func (pf *PortForwarder) PortForwardAPod(
 		return nil, fmt.Errorf("get free port failed: %w", err)
 	}
 
-	podName, err := pf.getPodName(ctx, target.Namespace, target.LabelSelector)
+	podName, err := getPodName(ctx, pf.podProvider, target)
 	if err != nil {
 		return nil, fmt.Errorf("could not port forward a pod: %w", err)
 	}
@@ -165,14 +170,14 @@ func resolveServerURL(host, namespace, podName string) url.URL {
 	return serverURL
 }
 
-func (pf *PortForwarder) getPodName(
+func getPodName(
 	ctx context.Context,
-	namespace string,
-	podLabelSelector map[string]string,
+	provider podProvider,
+	target *TargetPod,
 ) (string, error) {
-	pods, err := pf.podLister.listPods(ctx, &listPodsCommand{
-		namespace:      namespace,
-		labelSelectors: podLabelSelector,
+	pods, err := provider.listPods(ctx, &listPodsCommand{
+		namespace:      target.Namespace,
+		labelSelectors: target.LabelSelector,
 	})
 	if err != nil {
 		return "", err
@@ -181,13 +186,31 @@ func (pf *PortForwarder) getPodName(
 	if len(pods.Items) < 1 {
 		return "", fmt.Errorf(
 			"pods not found in [%s] namespace with selector %+v",
-			namespace, podLabelSelector,
+			target.Namespace, target.LabelSelector,
 		)
 	}
 
-	podName := pods.Items[0].GetName()
-	if podName == "" {
-		return "", fmt.Errorf("pod name should not be empty")
+	var podName string
+	if target.Name != "" {
+		for i := range pods.Items {
+			if pods.Items[i].GetName() == target.Name {
+				podName = target.Name
+				break
+			}
+		}
+
+		if podName == "" {
+			return "", fmt.Errorf(
+				"pod with name %s not found in namespace %s",
+				target.Name,
+				target.Namespace,
+			)
+		}
+	} else {
+		podName = pods.Items[0].GetName()
+		if podName == "" {
+			return "", fmt.Errorf("pod name should not be empty")
+		}
 	}
 
 	return podName, nil
