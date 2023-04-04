@@ -19,11 +19,17 @@ func main() {
 		panic(err)
 	}
 
+	namespace := "forwarder"
+	targetPort := uint(80)
+	matchLabel := map[string]string{"run": "nginx"}
+
 	process, err := pf.PortForwardAPod(
 		context.TODO(),
-		80,
-		"forwarder",
-		map[string]string{"run": "nginx"},
+		&portforwarder.TargetPod{
+			Namespace:     namespace,
+			Port:          targetPort,
+			LabelSelector: matchLabel,
+		},
 	)
 	if err != nil {
 		panic(err)
@@ -35,12 +41,12 @@ func main() {
 		process.Stop()
 	}()
 
-	<-process.Ready()
+	<-process.Started()
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", process.Port))
 	if err != nil {
 		panic(err)
 	}
 	defer resp.Body.Close()
 
-	<-process.Done()
+	<-process.Finished()
 }

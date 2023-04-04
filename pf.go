@@ -67,18 +67,22 @@ func NewPortForwarder(conn connector) (*PortForwarder, error) {
 	}, nil
 }
 
+type TargetPod struct {
+	Port          uint
+	Namespace     string
+	LabelSelector map[string]string
+}
+
 func (pf *PortForwarder) PortForwardAPod(
 	ctx context.Context,
-	targetPort uint,
-	namespace string,
-	podLabelSelector map[string]string,
+	target *TargetPod,
 ) (*PortForwardProcess, error) {
 	freePort, err := pf.freePortProvider.getFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("get free port failed: %w", err)
 	}
 
-	podName, err := pf.getPodName(ctx, namespace, podLabelSelector)
+	podName, err := pf.getPodName(ctx, target.Namespace, target.LabelSelector)
 	if err != nil {
 		return nil, fmt.Errorf("could not port forward a pod: %w", err)
 	}
@@ -91,10 +95,10 @@ func (pf *PortForwarder) PortForwardAPod(
 			p.Stop()
 		}()
 
-		if err := pf.portForwardAPod(p, namespace, podName, freePort, targetPort); err != nil {
+		if err := pf.portForwardAPod(p, target.Namespace, podName, freePort, target.Port); err != nil {
 			p.setError(fmt.Errorf(
 				"init port forwarder for pod %s in namespace %s failed: %w",
-				podName, namespace, err,
+				podName, target.Namespace, err,
 			))
 		}
 	}(process)
@@ -129,7 +133,7 @@ func (pf *PortForwarder) portForwardAPod(
 		if err = pf.forwarder.forward(
 			dialer,
 			[]string{fmt.Sprintf("%d:%d", freePort, targetPort)},
-			process.stopCh, process.readyCh,
+			process.stopCh, process.startedCh,
 			os.Stdout, os.Stderr, // todo: maybe log std err
 		); err != nil {
 			errCh <- err

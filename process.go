@@ -6,22 +6,22 @@ import (
 )
 
 type PortForwardProcess struct {
-	Port    uint
-	err     error
-	readyCh chan struct{}
-	doneCh  chan struct{}
-	stopCh  chan struct{}
-	stopper sync.Once
-	mx      sync.Mutex
-	wg      sync.WaitGroup
+	Port       uint
+	err        error
+	startedCh  chan struct{}
+	finishedCh chan struct{}
+	stopCh     chan struct{}
+	stopper    sync.Once
+	mx         sync.Mutex
+	wg         sync.WaitGroup
 }
 
 func newPortForwardProcess(ctx context.Context, port uint) *PortForwardProcess {
 	p := &PortForwardProcess{
-		Port:    port,
-		readyCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
-		stopCh:  make(chan struct{}),
+		Port:       port,
+		startedCh:  make(chan struct{}),
+		finishedCh: make(chan struct{}),
+		stopCh:     make(chan struct{}),
 	}
 
 	go func() {
@@ -30,7 +30,7 @@ func newPortForwardProcess(ctx context.Context, port uint) *PortForwardProcess {
 			p.setError(ctx.Err())
 			p.Stop()
 			return
-		case <-p.doneCh:
+		case <-p.finishedCh:
 			return
 		}
 	}()
@@ -42,16 +42,18 @@ func (p *PortForwardProcess) Stop() {
 	p.stopper.Do(func() {
 		close(p.stopCh)
 		p.wg.Wait()
-		close(p.doneCh)
+		close(p.finishedCh)
 	})
 }
 
-func (p *PortForwardProcess) Ready() <-chan struct{} {
-	return p.readyCh
+// Started signals that port forward has started
+func (p *PortForwardProcess) Started() <-chan struct{} {
+	return p.startedCh
 }
 
-func (p *PortForwardProcess) Done() <-chan struct{} {
-	return p.doneCh
+// Finished signals that port forward has finished
+func (p *PortForwardProcess) Finished() <-chan struct{} {
+	return p.finishedCh
 }
 
 func (p *PortForwardProcess) Err() error {
@@ -67,5 +69,5 @@ func (p *PortForwardProcess) setError(err error) {
 }
 
 func (p *PortForwardProcess) markAsReady() {
-	close(p.readyCh)
+	close(p.startedCh)
 }
