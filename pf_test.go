@@ -9,6 +9,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"net/url"
 	"testing"
 	"time"
 )
@@ -90,4 +91,51 @@ func TestPortForwarder_PortForwardAPod(t *testing.T) {
 		<-process.Finished()
 		assert.NoError(t, process.Err())
 	})
+}
+
+func Test_resolveServerURL(t *testing.T) {
+	type args struct {
+		host      string
+		namespace string
+		podName   string
+	}
+	tests := []struct {
+		name string
+		args args
+		want url.URL
+	}{
+		{
+			name: "https local host",
+			args: args{
+				host:      "https://127.0.0.1:5545",
+				namespace: "nginx-ns",
+				podName:   "nginx",
+			},
+			want: resolveTestURL(t, "https://127.0.0.1:5545/api/v1/namespaces/nginx-ns/pods/nginx/portforward"),
+		},
+		{
+			name: "https local host",
+			args: args{
+				host:      "http://some-cluster:99882",
+				namespace: "my-namespace",
+				podName:   "kafka-broker-0",
+			},
+			want: resolveTestURL(t, "https://some-cluster:99882/api/v1/namespaces/my-namespace/pods/kafka-broker-0/portforward"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, resolveServerURL(tt.args.host, tt.args.namespace, tt.args.podName), "resolveServerURL(%v, %v, %v)", tt.args.host, tt.args.namespace, tt.args.podName)
+		})
+	}
+}
+
+func resolveTestURL(t *testing.T, path string) url.URL {
+	t.Helper()
+
+	u, err := url.Parse(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *u
 }

@@ -120,7 +120,7 @@ func (pf *PortForwarder) portForwardAPod(
 		return err
 	}
 
-	serverURL := resolveServerURL(namespace, podName, pf)
+	serverURL := resolveServerURL(pf.restCfg.Host, namespace, podName)
 	dialer := spdy.NewDialer(
 		upgrader,
 		&http.Client{Transport: roundTripper},
@@ -154,13 +154,14 @@ func (pf *PortForwarder) portForwardAPod(
 	}
 }
 
-func resolveServerURL(namespace string, podName string, pf *PortForwarder) url.URL {
+func resolveServerURL(host, namespace, podName string) url.URL {
 	path := fmt.Sprintf(
 		"/api/v1/namespaces/%s/pods/%s/portforward",
 		namespace, podName,
 	)
-	hostIP := strings.TrimLeft(pf.restCfg.Host, "https://")
-	serverURL := url.URL{Scheme: "https", Path: path, Host: hostIP}
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimPrefix(host, "https://")
+	serverURL := url.URL{Scheme: "https", Path: path, Host: host}
 	return serverURL
 }
 
@@ -192,8 +193,7 @@ func (pf *PortForwarder) getPodName(
 	return podName, nil
 }
 
-type spdyForwarder struct {
-}
+type spdyForwarder struct{}
 
 func (f *spdyForwarder) forward(
 	dialer httpstream.Dialer,
