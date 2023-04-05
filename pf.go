@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -23,7 +23,8 @@ type freePortProvider interface {
 
 //go:generate go run github.com/vektra/mockery/v2@v2.20.2 --name podProvider
 type podProvider interface {
-	listPods(context.Context, *listPodsCommand) (*v1.PodList, error)
+	listPods(ctx context.Context, cmd *listPodsCommand) (*corev1.PodList, error)
+	getPod(ctx context.Context, namespace, name string) (*corev1.Pod, error)
 }
 
 //go:generate go run github.com/vektra/mockery/v2@v2.20.2 --name portForwarder
@@ -78,10 +79,37 @@ type TargetPod struct {
 	LabelSelector map[string]string
 }
 
+func (p *TargetPod) applyDefaults() {
+	if p.Namespace == "" {
+		p.Namespace = "default"
+	}
+}
+
+func (p *TargetPod) validate() error {
+	if p.Port == 0 {
+		return fmt.Errorf("%w target port is required", ErrTargetPodValidation)
+	}
+
+	if p.Namespace == "" {
+		return fmt.Errorf("%w namespace cannot be empty", ErrTargetPodValidation)
+	}
+
+	if p.Name == "" && len(p.LabelSelector) == 0 {
+		return fmt.Errorf("%w pod name or label selector should be specified", ErrTargetPodValidation)
+	}
+
+	return nil
+}
+
 func (pf *PortForwarder) PortForwardAPod(
 	ctx context.Context,
 	target *TargetPod,
 ) (*PortForwardProcess, error) {
+	target.applyDefaults()
+	if err := target.validate(); err != nil {
+		return nil, err
+	}
+
 	freePort, err := pf.freePortProvider.getFreePort()
 	if err != nil {
 		return nil, fmt.Errorf("get free port failed: %w", err)
@@ -175,6 +203,14 @@ func getPodName(
 	provider podProvider,
 	target *TargetPod,
 ) (string, error) {
+	if target.Name != "" {
+		pod, err := provider.getPod(ctx, target.Namespace, target.Name)
+		if err != nil {
+			return "", fmt.Errorf("%w: %s", ErrPodNotFound, err.Error())
+		}
+		return pod.Name, nil
+	}
+
 	pods, err := provider.listPods(ctx, &listPodsCommand{
 		namespace:      target.Namespace,
 		labelSelectors: target.LabelSelector,
@@ -185,32 +221,14 @@ func getPodName(
 
 	if len(pods.Items) < 1 {
 		return "", fmt.Errorf(
-			"pods not found in [%s] namespace with selector %+v",
-			target.Namespace, target.LabelSelector,
+			"%w: pods not found in [%s] namespace with provider %+v",
+			ErrPodNotFound, target.Namespace, target.LabelSelector,
 		)
 	}
 
-	var podName string
-	if target.Name != "" {
-		for i := range pods.Items {
-			if pods.Items[i].GetName() == target.Name {
-				podName = target.Name
-				break
-			}
-		}
-
-		if podName == "" {
-			return "", fmt.Errorf(
-				"pod with name %s not found in namespace %s",
-				target.Name,
-				target.Namespace,
-			)
-		}
-	} else {
-		podName = pods.Items[0].GetName()
-		if podName == "" {
-			return "", fmt.Errorf("pod name should not be empty")
-		}
+	podName := pods.Items[0].GetName()
+	if podName == "" {
+		return "", fmt.Errorf("%w: pod name should not be empty", ErrPodNotFound)
 	}
 
 	return podName, nil

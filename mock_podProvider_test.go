@@ -22,17 +22,73 @@ func (_m *mockPodProvider) EXPECT() *mockPodProvider_Expecter {
 	return &mockPodProvider_Expecter{mock: &_m.Mock}
 }
 
-// listPods provides a mock function with given fields: _a0, _a1
-func (_m *mockPodProvider) listPods(_a0 context.Context, _a1 *listPodsCommand) (*v1.PodList, error) {
-	ret := _m.Called(_a0, _a1)
+// getPod provides a mock function with given fields: ctx, namespace, name
+func (_m *mockPodProvider) getPod(ctx context.Context, namespace string, name string) (*v1.Pod, error) {
+	ret := _m.Called(ctx, namespace, name)
+
+	var r0 *v1.Pod
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) (*v1.Pod, error)); ok {
+		return rf(ctx, namespace, name)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, string) *v1.Pod); ok {
+		r0 = rf(ctx, namespace, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*v1.Pod)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = rf(ctx, namespace, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// mockPodProvider_getPod_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'getPod'
+type mockPodProvider_getPod_Call struct {
+	*mock.Call
+}
+
+// getPod is a helper method to define mock.On call
+//   - ctx context.Context
+//   - namespace string
+//   - name string
+func (_e *mockPodProvider_Expecter) getPod(ctx interface{}, namespace interface{}, name interface{}) *mockPodProvider_getPod_Call {
+	return &mockPodProvider_getPod_Call{Call: _e.mock.On("getPod", ctx, namespace, name)}
+}
+
+func (_c *mockPodProvider_getPod_Call) Run(run func(ctx context.Context, namespace string, name string)) *mockPodProvider_getPod_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string))
+	})
+	return _c
+}
+
+func (_c *mockPodProvider_getPod_Call) Return(_a0 *v1.Pod, _a1 error) *mockPodProvider_getPod_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *mockPodProvider_getPod_Call) RunAndReturn(run func(context.Context, string, string) (*v1.Pod, error)) *mockPodProvider_getPod_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// listPods provides a mock function with given fields: ctx, cmd
+func (_m *mockPodProvider) listPods(ctx context.Context, cmd *listPodsCommand) (*v1.PodList, error) {
+	ret := _m.Called(ctx, cmd)
 
 	var r0 *v1.PodList
 	var r1 error
 	if rf, ok := ret.Get(0).(func(context.Context, *listPodsCommand) (*v1.PodList, error)); ok {
-		return rf(_a0, _a1)
+		return rf(ctx, cmd)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, *listPodsCommand) *v1.PodList); ok {
-		r0 = rf(_a0, _a1)
+		r0 = rf(ctx, cmd)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.PodList)
@@ -40,7 +96,7 @@ func (_m *mockPodProvider) listPods(_a0 context.Context, _a1 *listPodsCommand) (
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, *listPodsCommand) error); ok {
-		r1 = rf(_a0, _a1)
+		r1 = rf(ctx, cmd)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -54,13 +110,13 @@ type mockPodProvider_listPods_Call struct {
 }
 
 // listPods is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *listPodsCommand
-func (_e *mockPodProvider_Expecter) listPods(_a0 interface{}, _a1 interface{}) *mockPodProvider_listPods_Call {
-	return &mockPodProvider_listPods_Call{Call: _e.mock.On("listPods", _a0, _a1)}
+//   - ctx context.Context
+//   - cmd *listPodsCommand
+func (_e *mockPodProvider_Expecter) listPods(ctx interface{}, cmd interface{}) *mockPodProvider_listPods_Call {
+	return &mockPodProvider_listPods_Call{Call: _e.mock.On("listPods", ctx, cmd)}
 }
 
-func (_c *mockPodProvider_listPods_Call) Run(run func(_a0 context.Context, _a1 *listPodsCommand)) *mockPodProvider_listPods_Call {
+func (_c *mockPodProvider_listPods_Call) Run(run func(ctx context.Context, cmd *listPodsCommand)) *mockPodProvider_listPods_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(*listPodsCommand))
 	})

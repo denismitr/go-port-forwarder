@@ -94,7 +94,7 @@ func TestPortForwarder_PortForwardAPod(t *testing.T) {
 }
 
 func Test_getPodName(t *testing.T) {
-	t.Run("find by namespace and selector", func(t *testing.T) {
+	t.Run("find by namespace and provider", func(t *testing.T) {
 		ctx := context.TODO()
 		namespace := "kafka-ns"
 		ls := map[string]string{"app": "foo"}

@@ -10,12 +10,12 @@ import (
 	"strings"
 )
 
-type selector struct {
+type provider struct {
 	clientSet *kubernetes.Clientset
 }
 
-func newSelectorFromKubeConfig(k8sClientSet *kubernetes.Clientset) *selector {
-	return &selector{clientSet: k8sClientSet}
+func newSelectorFromKubeConfig(k8sClientSet *kubernetes.Clientset) *provider {
+	return &provider{clientSet: k8sClientSet}
 }
 
 type listPodsCommand struct {
@@ -24,14 +24,29 @@ type listPodsCommand struct {
 	fieldSelectors map[string]string
 }
 
-func (s *selector) listPods(
+func (p *provider) getPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	pod, err := p.clientSet.
+		CoreV1().
+		Pods(namespace).
+		Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf(
+			"%w: failed to get pod %s in namespace %s",
+			err, name, namespace,
+		)
+	}
+
+	return pod, nil
+}
+
+func (p *provider) listPods(
 	ctx context.Context, cmd *listPodsCommand,
 ) (*corev1.PodList, error) {
 	opts := metav1.ListOptions{
 		LabelSelector: buildSelector(cmd.labelSelectors),
 		FieldSelector: buildSelector(cmd.fieldSelectors),
 	}
-	resp, err := s.clientSet.
+	resp, err := p.clientSet.
 		CoreV1().
 		Pods(cmd.namespace).
 		List(ctx, opts)

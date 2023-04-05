@@ -23,7 +23,7 @@ func TestPortForward_Integration(t *testing.T) {
 	kubeConfig := os.Getenv("K8S_CONFIG")
 	conn := NewKubeConfigConnector(masterURL, kubeConfig)
 
-	t.Run("integration test with nginx", func(t *testing.T) {
+	t.Run("integration test with nginx by label selector", func(t *testing.T) {
 		pf, err := NewPortForwarder(conn)
 		require.NoError(t, err)
 		require.NotNil(t, pf)
@@ -34,6 +34,47 @@ func TestPortForward_Integration(t *testing.T) {
 				Port:          80,
 				Namespace:     "forwarder",
 				LabelSelector: map[string]string{"run": "nginx"},
+			},
+		)
+		require.NoError(t, err)
+		require.NotNil(t, process)
+
+		go func() {
+			<-time.After(3 * time.Second)
+			process.Stop()
+		}()
+
+		<-process.Started()
+		resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d", process.Port))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		nginxHtml, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Truef(
+			t,
+			strings.Contains(string(nginxHtml),
+				"Welcome to nginx!"),
+			"No expected text in NGINX response: %s",
+			string(nginxHtml),
+		)
+
+		<-process.Finished()
+		require.NoError(t, process.Err())
+		t.Log("\nport forward for nginx 80 is done")
+	})
+
+	t.Run("integration test with nginx by name", func(t *testing.T) {
+		pf, err := NewPortForwarder(conn)
+		require.NoError(t, err)
+		require.NotNil(t, pf)
+
+		process, err := pf.PortForwardAPod(
+			context.TODO(),
+			&TargetPod{
+				Port:      80,
+				Namespace: "forwarder",
+				Name:      "nginx",
 			},
 		)
 		require.NoError(t, err)
